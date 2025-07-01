@@ -208,9 +208,13 @@ nav_msgs::msg::Path ThetaStarOrientedPlanner::linearInterpolation(
     coordsW pt1 = raw_path[j];
     p1.pose.position.x = pt1.x;
     p1.pose.position.y = pt1.y;
-    pa.poses.push_back(p1);
+    //pa.poses.push_back(p1);
 
     coordsW pt2 = raw_path[j + 1];
+    double theta1 = atan2(pt2.y - pt1.y, pt2.x - pt1.x);
+    tf2::Quaternion q1;
+    q1.setRPY(0.0, 0.0, theta1);
+    p1.pose.orientation = tf2::toMsg(q1);
     double distance = std::hypot(pt2.x - pt1.x, pt2.y - pt1.y);
     int loops = static_cast<int>(distance / dist_bw_points);
     double sin_alpha = (pt2.y - pt1.y) / distance;
