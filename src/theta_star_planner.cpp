@@ -15,8 +15,8 @@
 #include <vector>
 #include <memory>
 #include <string>
-#include "nav2_theta_star_planner/theta_star_planner.hpp"
-#include "nav2_theta_star_planner/theta_star.hpp"
+#include "nav2_theta_star_oriented_planner/theta_star_planner.hpp"
+#include "nav2_theta_star_oriented_planner/theta_star.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/LinearMath/Quaternion.h"
@@ -89,7 +89,8 @@ void ThetaStarOrientedPlanner::deactivate()
 
 nav_msgs::msg::Path ThetaStarOrientedPlanner::createPlan(
   const geometry_msgs::msg::PoseStamped & start,
-  const geometry_msgs::msg::PoseStamped & goal)
+  const geometry_msgs::msg::PoseStamped & goal,
+  std::function<bool()> cancel_checker)
 {
   nav_msgs::msg::Path global_path;
   auto start_time = std::chrono::steady_clock::now();
