@@ -16,8 +16,8 @@
 #include <memory>
 #include <vector>
 #include "rclcpp/rclcpp.hpp"
-#include "nav2_theta_star_planner/theta_star.hpp"
-#include "nav2_theta_star_planner/theta_star_planner.hpp"
+#include "nav2_theta_star_oriented_planner/theta_star.hpp"
+#include "nav2_theta_star_oriented_planner/theta_star_planner.hpp"
 
 class init_rclcpp
 {
@@ -161,8 +161,8 @@ TEST(ThetaStarOrientedPlanner, test_theta_star_planner) {
   auto planner_2d = std::make_unique<nav2_theta_star_oriented_planner::ThetaStarOrientedPlanner>();
   planner_2d->configure(life_node, "test", nullptr, costmap_ros);
   planner_2d->activate();
-
-  nav_msgs::msg::Path path = planner_2d->createPlan(start, goal);
+  auto never_cancel = []() { return false; };
+  nav_msgs::msg::Path path = planner_2d->createPlan(start, goal, never_cancel);
   EXPECT_GT(static_cast<int>(path.poses.size()), 0);
 
   // test if the goal is unsafe
@@ -174,7 +174,8 @@ TEST(ThetaStarOrientedPlanner, test_theta_star_planner) {
   goal.pose.position.x = 1.0;
   goal.pose.position.y = 1.0;
 
-  EXPECT_THROW(planner_2d->createPlan(start, goal), nav2_core::GoalOccupied);
+  
+  EXPECT_THROW(planner_2d->createPlan(start, goal, never_cancel), nav2_core::GoalOccupied);
 
   planner_2d->deactivate();
   planner_2d->cleanup();
