@@ -13,7 +13,7 @@
 //  limitations under the License.
 
 #include <vector>
-#include "nav2_theta_star_planner/theta_star.hpp"
+#include "nav2_theta_star_oriented_planner/theta_star.hpp"
 
 namespace theta_star
 {

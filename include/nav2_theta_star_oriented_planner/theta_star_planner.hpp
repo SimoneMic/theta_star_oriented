@@ -32,7 +32,7 @@
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_util/node_utils.hpp"
-#include "nav2_theta_star_planner/theta_star.hpp"
+#include "nav2_theta_star_oriented_planner/theta_star.hpp"
 #include "nav2_util/geometry_utils.hpp"
 
 using rcl_interfaces::msg::ParameterType;
