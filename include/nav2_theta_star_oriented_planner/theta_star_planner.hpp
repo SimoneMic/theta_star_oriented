@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// Modifications Copyright 2024 Simone Micheletti
+// Licensed under the Apache License, Version 2.0
 
 #ifndef NAV2_THETA_STAR_PLANNER__THETA_STAR_PLANNER_HPP_
 #define NAV2_THETA_STAR_PLANNER__THETA_STAR_PLANNER_HPP_
