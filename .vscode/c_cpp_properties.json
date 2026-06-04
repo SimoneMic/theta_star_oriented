@@ -4,6 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
+                "/opt/ros/jazzy/include/**",
                 "/opt/ros/iron/include/**"
             ],
             "defines": [],

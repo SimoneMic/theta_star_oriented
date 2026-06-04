@@ -65,6 +65,8 @@ protected:
   rclcpp::Logger logger_{rclcpp::get_logger("ThetaStarOrientedPlanner")};
   std::string global_frame_, name_;
   bool use_final_approach_orientation_;
+  double proximity_threshold_;
+  double orientation_delta_;
 
   // parent node weak ptr
   rclcpp_lifecycle::LifecycleNode::WeakPtr parent_node_;

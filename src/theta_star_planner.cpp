@@ -20,6 +20,7 @@
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/LinearMath/Quaternion.h"
+#include "tf2/utils.h"
 
 namespace nav2_theta_star_oriented_planner
 {
@@ -65,6 +66,14 @@ void ThetaStarOrientedPlanner::configure(
   nav2_util::declare_parameter_if_not_declared(
     node, name + ".use_final_approach_orientation", rclcpp::ParameterValue(false));
   node->get_parameter(name + ".use_final_approach_orientation", use_final_approach_orientation_);
+
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".proximity_threshold", rclcpp::ParameterValue(1.0));
+  node->get_parameter(name_ + ".proximity_threshold", proximity_threshold_);
+
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".orientation_delta", rclcpp::ParameterValue(0.2));
+  node->get_parameter(name_ + ".orientation_delta", orientation_delta_);
 }
 
 void ThetaStarOrientedPlanner::cleanup()
@@ -150,28 +159,53 @@ nav_msgs::msg::Path ThetaStarOrientedPlanner::createPlan(
     logger_, "Got the src and dst... (%i, %i) && (%i, %i)",
     planner_->src_.x, planner_->src_.y, planner_->dst_.x, planner_->dst_.y);
   getPlan(global_path);
-  // check if a plan is generated
   size_t plan_size = global_path.poses.size();
-  if (plan_size > 0) {
-    global_path.poses.back().pose.orientation = goal.pose.orientation;
-  }
 
-  // If use_final_approach_orientation=true, interpolate the last pose orientation from the
-  // previous pose to set the orientation to the 'final approach' orientation of the robot so
-  // it does not rotate.
-  // And deal with corner case of plan of length 1
-  if (use_final_approach_orientation_) {
-    if (plan_size == 1) {
-      global_path.poses.back().pose.orientation = start.pose.orientation;
-    } else if (plan_size > 1) {
-      double dx, dy, theta;
-      auto last_pose = global_path.poses.back().pose.position;
-      auto approach_pose = global_path.poses[plan_size - 2].pose.position;
-      dx = last_pose.x - approach_pose.x;
-      dy = last_pose.y - approach_pose.y;
-      theta = atan2(dy, dx);
-      global_path.poses.back().pose.orientation =
-        nav2_util::geometry_utils::orientationAroundZAxis(theta);
+  // When start and goal are close enough and orientation difference is within orientation_delta,
+  // assign the average of start and goal yaw to every pose in the path.
+  double dist_sg = std::hypot(
+    goal.pose.position.x - start.pose.position.x,
+    goal.pose.position.y - start.pose.position.y);
+  tf2::Quaternion q_start, q_goal;
+  tf2::fromMsg(start.pose.orientation, q_start);
+  tf2::fromMsg(goal.pose.orientation, q_goal);
+  double yaw_start = tf2::getYaw(q_start);
+  double yaw_goal = tf2::getYaw(q_goal);
+  double angle_diff = std::abs(
+    std::atan2(std::sin(yaw_goal - yaw_start), std::cos(yaw_goal - yaw_start)));
+
+  if (dist_sg <= proximity_threshold_ && angle_diff <= orientation_delta_) {
+    double avg_yaw = std::atan2(
+      std::sin(yaw_start) + std::sin(yaw_goal),
+      std::cos(yaw_start) + std::cos(yaw_goal));
+    tf2::Quaternion q_avg;
+    q_avg.setRPY(0.0, 0.0, avg_yaw);
+    auto avg_orientation = tf2::toMsg(q_avg);
+    for (auto & pose : global_path.poses) {
+      pose.pose.orientation = avg_orientation;
+    }
+  } else {
+    if (plan_size > 0) {
+      global_path.poses.back().pose.orientation = goal.pose.orientation;
+    }
+
+    // If use_final_approach_orientation=true, interpolate the last pose orientation from the
+    // previous pose to set the orientation to the 'final approach' orientation of the robot so
+    // it does not rotate.
+    // And deal with corner case of plan of length 1
+    if (use_final_approach_orientation_) {
+      if (plan_size == 1) {
+        global_path.poses.back().pose.orientation = start.pose.orientation;
+      } else if (plan_size > 1) {
+        double dx, dy, theta;
+        auto last_pose = global_path.poses.back().pose.position;
+        auto approach_pose = global_path.poses[plan_size - 2].pose.position;
+        dx = last_pose.x - approach_pose.x;
+        dy = last_pose.y - approach_pose.y;
+        theta = atan2(dy, dx);
+        global_path.poses.back().pose.orientation =
+          nav2_util::geometry_utils::orientationAroundZAxis(theta);
+      }
     }
   }
 
@@ -251,6 +285,10 @@ ThetaStarOrientedPlanner::dynamicParametersCallback(std::vector<rclcpp::Paramete
         planner_->w_euc_cost_ = parameter.as_double();
       } else if (name == name_ + ".w_traversal_cost") {
         planner_->w_traversal_cost_ = parameter.as_double();
+      } else if (name == name_ + ".proximity_threshold") {
+        proximity_threshold_ = parameter.as_double();
+      } else if (name == name_ + ".orientation_delta") {
+        orientation_delta_ = parameter.as_double();
       }
     } else if (type == ParameterType::PARAMETER_BOOL) {
       if (name == name_ + ".use_final_approach_orientation") {
