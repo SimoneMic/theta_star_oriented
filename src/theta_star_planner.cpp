@@ -15,6 +15,7 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <limits>
 #include "nav2_theta_star_oriented_planner/theta_star_planner.hpp"
 #include "nav2_theta_star_oriented_planner/theta_star.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
@@ -74,6 +75,14 @@ void ThetaStarOrientedPlanner::configure(
   nav2_util::declare_parameter_if_not_declared(
     node, name_ + ".orientation_delta", rclcpp::ParameterValue(0.2));
   node->get_parameter(name_ + ".orientation_delta", orientation_delta_);
+
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".escape_distance", rclcpp::ParameterValue(0.4));
+  node->get_parameter(name_ + ".escape_distance", escape_distance_);
+
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".escape_lateral_range", rclcpp::ParameterValue(0.1));
+  node->get_parameter(name_ + ".escape_lateral_range", escape_lateral_range_);
 }
 
 void ThetaStarOrientedPlanner::cleanup()
@@ -154,11 +163,76 @@ nav_msgs::msg::Path ThetaStarOrientedPlanner::createPlan(
     return global_path;
   }
 
-  planner_->setStartAndGoal(start, goal);
-  RCLCPP_DEBUG(
-    logger_, "Got the src and dst... (%i, %i) && (%i, %i)",
-    planner_->src_.x, planner_->src_.y, planner_->dst_.x, planner_->dst_.y);
-  getPlan(global_path);
+  // If an obstacle is within escape_distance_, compute a repulsion-based escape waypoint,
+  // plan start to escape then escape to goal and concatenate.
+  // Fall back to direct planning if the escape point is invalid or either sub-plan fails.
+  bool escape_planned = false;
+  if (escape_distance_ > 0.0) {
+    double escape_x, escape_y;
+    double dummy_x, dummy_y;
+    bool goal_near_obstacle = computeEscapePoint(goal, dummy_x, dummy_y);
+    if (!goal_near_obstacle && computeEscapePoint(start, escape_x, escape_y)) {
+      unsigned int mx_esc, my_esc;
+      bool escape_free =
+        planner_->costmap_->worldToMap(escape_x, escape_y, mx_esc, my_esc) &&
+        planner_->costmap_->getCost(mx_esc, my_esc) < nav2_costmap_2d::LETHAL_OBSTACLE;
+
+      if (escape_free) {
+        geometry_msgs::msg::PoseStamped escape_pose;
+        escape_pose.header = start.header;
+        escape_pose.pose.position.x = escape_x;
+        escape_pose.pose.position.y = escape_y;
+        escape_pose.pose.position.z = 0.0;
+        // Face toward goal from the escape point
+        tf2::Quaternion q_esc;
+        q_esc.setRPY(
+          0.0, 0.0,
+          std::atan2(
+            goal.pose.position.y - escape_y,
+            goal.pose.position.x - escape_x));
+        escape_pose.pose.orientation = tf2::toMsg(q_esc);
+
+        try {
+          nav_msgs::msg::Path escape_path;
+          planner_->setStartAndGoal(start, escape_pose);
+          getPlan(escape_path);
+          for (auto & pose : escape_path.poses) {
+            pose.pose.orientation = start.pose.orientation;
+          }
+
+          planner_->setStartAndGoal(escape_pose, goal);
+          getPlan(global_path);
+          if (!global_path.poses.empty()) {
+            global_path.poses.front().pose.orientation = start.pose.orientation;
+          }
+
+          // Prepend escape segment
+          escape_path.poses.insert(
+            escape_path.poses.end(),
+            global_path.poses.begin(),
+            global_path.poses.end());
+          global_path = escape_path;
+          escape_planned = true;
+          RCLCPP_DEBUG(
+            logger_, "Escape path planned via (%.2f, %.2f)", escape_x, escape_y);
+        } catch (const std::exception & e) {
+          RCLCPP_WARN(
+            logger_,
+            "Escape path planning failed (%s), falling back to direct planning.", e.what());
+          global_path.poses.clear();
+        }
+      }
+    }
+  }
+
+  if (!escape_planned) {
+    planner_->setStartAndGoal(start, goal);
+    RCLCPP_DEBUG(
+      logger_, "Got the src and dst... (%i, %i) && (%i, %i)",
+      planner_->src_.x, planner_->src_.y, planner_->dst_.x, planner_->dst_.y);
+    getPlan(global_path);
+  }
+
   size_t plan_size = global_path.poses.size();
 
   // When start and goal are close enough and orientation difference is within orientation_delta,
@@ -207,6 +281,15 @@ nav_msgs::msg::Path ThetaStarOrientedPlanner::createPlan(
           nav2_util::geometry_utils::orientationAroundZAxis(theta);
       }
     }
+  }
+
+  // Prepend the robot's actual start pose so the path always begins at the robot position.
+  // linearInterpolation skips the first raw waypoint (inner loop starts at k=1).
+  if (!global_path.poses.empty()) {
+    geometry_msgs::msg::PoseStamped start_pose;
+    start_pose.header = global_path.header;
+    start_pose.pose = start.pose;
+    global_path.poses.insert(global_path.poses.begin(), start_pose);
   }
 
   auto stop_time = std::chrono::steady_clock::now();
@@ -289,6 +372,10 @@ ThetaStarOrientedPlanner::dynamicParametersCallback(std::vector<rclcpp::Paramete
         proximity_threshold_ = parameter.as_double();
       } else if (name == name_ + ".orientation_delta") {
         orientation_delta_ = parameter.as_double();
+      } else if (name == name_ + ".escape_distance") {
+        escape_distance_ = parameter.as_double();
+      } else if (name == name_ + ".escape_lateral_range") {
+        escape_lateral_range_ = parameter.as_double();
       }
     } else if (type == ParameterType::PARAMETER_BOOL) {
       if (name == name_ + ".use_final_approach_orientation") {
@@ -301,6 +388,90 @@ ThetaStarOrientedPlanner::dynamicParametersCallback(std::vector<rclcpp::Paramete
 
   result.successful = true;
   return result;
+}
+
+bool ThetaStarOrientedPlanner::computeEscapePoint(
+  const geometry_msgs::msg::PoseStamped & start,
+  double & escape_x, double & escape_y)
+{
+  unsigned int mx_start, my_start;
+  if (!planner_->costmap_->worldToMap(
+      start.pose.position.x, start.pose.position.y, mx_start, my_start))
+  {
+    return false;
+  }
+
+  tf2::Quaternion q;
+  tf2::fromMsg(start.pose.orientation, q);
+  const double yaw = tf2::getYaw(q);
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+
+  const double resolution = planner_->costmap_->getResolution();
+  const int radius_cells = static_cast<int>(std::ceil(escape_distance_ / resolution));
+  const int size_x = static_cast<int>(planner_->costmap_->getSizeInCellsX());
+  const int size_y = static_cast<int>(planner_->costmap_->getSizeInCellsY());
+
+  double nearest_obs_x = 0.0, nearest_obs_y = 0.0;
+  double nearest_dist = std::numeric_limits<double>::max();
+  bool found_obstacle = false;
+
+  for (int dy = -radius_cells; dy <= radius_cells; dy++) {
+    for (int dx = -radius_cells; dx <= radius_cells; dx++) {
+      const double world_dx = dx * resolution;
+      const double world_dy = dy * resolution;
+
+      // Project offset into robot frame: forward (local_x) and lateral (local_y)
+      const double local_x =  world_dx * cos_yaw + world_dy * sin_yaw;
+      const double local_y = -world_dx * sin_yaw + world_dy * cos_yaw;
+
+      // Only obstacles strictly ahead and within the lateral corridor
+      if (local_x <= 0.0 || std::abs(local_y) > escape_lateral_range_) {
+        continue;
+      }
+
+      const double dist = std::hypot(world_dx, world_dy);
+      if (dist > escape_distance_) {
+        continue;
+      }
+
+      const int nx = static_cast<int>(mx_start) + dx;
+      const int ny = static_cast<int>(my_start) + dy;
+      if (nx < 0 || ny < 0 || nx >= size_x || ny >= size_y) {
+        continue;
+      }
+
+      if (planner_->costmap_->getCost(nx, ny) >= nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE) {
+        if (dist < nearest_dist) {
+          nearest_dist = dist;
+          nearest_obs_x = start.pose.position.x + world_dx;
+          nearest_obs_y = start.pose.position.y + world_dy;
+          found_obstacle = true;
+        }
+      }
+    }
+  }
+
+  if (!found_obstacle) {
+    return false;
+  }
+
+  // Direction from the nearest obstacle back toward the robot
+  double dir_x = start.pose.position.x - nearest_obs_x;
+  double dir_y = start.pose.position.y - nearest_obs_y;
+  const double norm = std::hypot(dir_x, dir_y);
+  if (norm < 1e-6) {
+    dir_x = -cos_yaw;
+    dir_y = -sin_yaw;
+  } else {
+    dir_x /= norm;
+    dir_y /= norm;
+  }
+
+  // Place escape point escape_distance_ behind the obstacle (toward the robot)
+  escape_x = nearest_obs_x + dir_x * escape_distance_;
+  escape_y = nearest_obs_y + dir_y * escape_distance_;
+  return true;
 }
 
 }  // namespace nav2_theta_star_oriented_planner

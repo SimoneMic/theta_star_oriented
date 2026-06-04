@@ -64,9 +64,29 @@ protected:
   rclcpp::Clock::SharedPtr clock_;
   rclcpp::Logger logger_{rclcpp::get_logger("ThetaStarOrientedPlanner")};
   std::string global_frame_, name_;
+
+  /// If true, the last pose orientation is set to match the robot's approach direction
+  /// instead of the goal orientation, preventing an in-place rotation at the goal.
   bool use_final_approach_orientation_;
+
+  /// Maximum cartesian distance (m) between start and goal below which the
+  /// average-orientation mode is considered. Must also satisfy orientation_delta_.
   double proximity_threshold_;
+
+  /// Maximum absolute angular difference (rad) between start and goal orientations
+  /// below which all path poses are assigned the circular mean of both orientations.
+  /// Only active when the start-goal distance is within proximity_threshold_.
   double orientation_delta_;
+
+  /// Detection radius (m) ahead of the robot for obstacle checking and, when an
+  /// obstacle is found, the stand-off distance placed behind that obstacle for the
+  /// escape waypoint. Set to 0 to disable the escape behaviour entirely.
+  double escape_distance_;
+
+  /// Half-width (m) of the forward corridor used when scanning for blocking obstacles.
+  /// Obstacles whose lateral offset in the robot frame exceeds this value are ignored,
+  /// preventing false escapes in narrow passages where walls are beside the robot.
+  double escape_lateral_range_;
 
   // parent node weak ptr
   rclcpp_lifecycle::LifecycleNode::WeakPtr parent_node_;
@@ -99,6 +119,18 @@ protected:
    */
   rcl_interfaces::msg::SetParametersResult
   dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
+
+  /**
+   * @brief Scans the costmap around start for obstacles within escape_distance_.
+   *        Computes a repulsion-based escape point if any obstacle is found.
+   * @param start current robot pose
+   * @param escape_x world-frame x of the escape waypoint
+   * @param escape_y world-frame y of the escape waypoint
+   * @return true if an obstacle was found and an escape point was computed
+   */
+  bool computeEscapePoint(
+    const geometry_msgs::msg::PoseStamped & start,
+    double & escape_x, double & escape_y);
 };
 }   //  namespace nav2_theta_star_planner
 
