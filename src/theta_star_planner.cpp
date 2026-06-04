@@ -73,7 +73,7 @@ void ThetaStarOrientedPlanner::configure(
   node->get_parameter(name_ + ".proximity_threshold", proximity_threshold_);
 
   nav2_util::declare_parameter_if_not_declared(
-    node, name_ + ".orientation_delta", rclcpp::ParameterValue(0.2));
+    node, name_ + ".orientation_delta", rclcpp::ParameterValue(0.4));
   node->get_parameter(name_ + ".orientation_delta", orientation_delta_);
 
   nav2_util::declare_parameter_if_not_declared(
