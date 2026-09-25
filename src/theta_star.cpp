@@ -24,6 +24,8 @@ ThetaStar::ThetaStar()
   w_heuristic_cost_(1.0),
   how_many_corners_(8),
   allow_unknown_(true),
+  los_max_cost_(LETHAL_COST + 1),
+  cost_exponent_(0.0),
   size_x_(0),
   size_y_(0),
   index_generated_(0)
@@ -191,16 +193,16 @@ bool ThetaStar::losCheck(
     while (cx != x1) {
       f += dy;
       if (f >= dx) {
-        if (!isSafe(cx + u_x, cy + u_y, sl_cost)) {
+        if (!isLosSafe(cx + u_x, cy + u_y, sl_cost)) {
           return false;
         }
         cy += sy;
         f -= dx;
       }
-      if (f != 0 && !isSafe(cx + u_x, cy + u_y, sl_cost)) {
+      if (f != 0 && !isLosSafe(cx + u_x, cy + u_y, sl_cost)) {
         return false;
       }
-      if (dy == 0 && !isSafe(cx + u_x, cy, sl_cost) && !isSafe(cx + u_x, cy - 1, sl_cost)) {
+      if (dy == 0 && !isLosSafe(cx + u_x, cy, sl_cost) && !isLosSafe(cx + u_x, cy - 1, sl_cost)) {
         return false;
       }
       cx += sx;
@@ -209,16 +211,16 @@ bool ThetaStar::losCheck(
     while (cy != y1) {
       f = f + dx;
       if (f >= dy) {
-        if (!isSafe(cx + u_x, cy + u_y, sl_cost)) {
+        if (!isLosSafe(cx + u_x, cy + u_y, sl_cost)) {
           return false;
         }
         cx += sx;
         f -= dy;
       }
-      if (f != 0 && !isSafe(cx + u_x, cy + u_y, sl_cost)) {
+      if (f != 0 && !isLosSafe(cx + u_x, cy + u_y, sl_cost)) {
         return false;
       }
-      if (dx == 0 && !isSafe(cx, cy + u_y, sl_cost) && !isSafe(cx - 1, cy + u_y, sl_cost)) {
+      if (dx == 0 && !isLosSafe(cx, cy + u_y, sl_cost) && !isLosSafe(cx - 1, cy + u_y, sl_cost)) {
         return false;
       }
       cy += sy;

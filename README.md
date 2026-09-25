@@ -24,11 +24,15 @@ Each cell's traversal cost combines three weighted components:
 
 | Component | Formula | Parameter |
 |-----------|---------|-----------|
-| Traversal cost | `w_traversal_cost × (cell_cost / LETHAL_COST)²` | `w_traversal_cost` |
+| Traversal cost | `w_traversal_cost × ((26 + 0.9 × cell_cost) / LETHAL_COST)²`, or `w_traversal_cost × (cell_cost / LETHAL_COST)^cost_exponent` when `cost_exponent > 0` | `w_traversal_cost`, `cost_exponent` |
 | Euclidean step cost | `w_euc_cost × hypot(Δx, Δy)` | `w_euc_cost` |
 | Heuristic | `w_heuristic_cost × hypot(dx_to_goal, dy_to_goal)` | auto-set to `min(w_euc_cost, 1.0)` |
 
 The heuristic weight is automatically clamped to maintain admissibility.
+
+The legacy traversal cost is fairly flat: a cell next to the inscribed radius costs only ~2× a cell in open space, so paths graze inflated corners. Setting `cost_exponent` (e.g. `4`) together with a larger `w_traversal_cost` (e.g. `10`) makes the cost rise sharply near obstacles and pushes paths around corners with more clearance.
+
+Line-of-sight shortcuts can additionally be restricted with `los_max_cost`: a shortcut is rejected if it crosses any known cell whose raw cost exceeds this value. Normal grid expansion is unaffected, so narrow passages remain plannable.
 
 ### Orientation Assignment
 
@@ -56,6 +60,8 @@ All parameters support dynamic reconfiguration via the ROS2 parameter API.
 | `allow_unknown` | bool | `true` | Allow planning through unknown (`255`) costmap cells |
 | `w_euc_cost` | double | `1.0` | Weight for the Euclidean step cost |
 | `w_traversal_cost` | double | `2.0` | Weight for the obstacle traversal cost |
+| `cost_exponent` | double | `0.0` | Exponent `n` of the traversal cost `w × (cost / 252)^n`; `<= 0` keeps the legacy formula |
+| `los_max_cost` | int | `253` | Max raw cell cost (0–254) a line-of-sight shortcut may cross; `>= 252` disables the check |
 | `use_final_approach_orientation` | bool | `false` | Set the last pose heading to the robot's approach direction |
 | `proximity_threshold` | double | `1.0` | Distance (m) threshold for average-orientation mode |
 | `orientation_delta` | double | `0.4` | Max heading difference (rad) for average-orientation mode |
@@ -63,7 +69,7 @@ All parameters support dynamic reconfiguration via the ROS2 parameter API.
 | `escape_lateral_range` | double | `0.1` | Half-width (m) of the forward corridor used in escape detection |
 
 **Tuning guidance:**
-- Increase `w_traversal_cost` to push paths further from obstacles.
+- Increase `w_traversal_cost` to push paths further from obstacles. With the legacy formula this has little effect; combine it with `cost_exponent: 4.0` for a much stronger push away from corners.
 - Increase `w_euc_cost` to prefer shorter straight-line paths.
 - Use `how_many_corners: 4` in narrow corridors to avoid diagonal cuts through walls.
 
@@ -81,6 +87,8 @@ planner_server:
       allow_unknown: true
       w_euc_cost: 1.0
       w_traversal_cost: 2.0
+      cost_exponent: 0.0
+      los_max_cost: 253
       use_final_approach_orientation: false
       proximity_threshold: 1.0
       orientation_delta: 0.4

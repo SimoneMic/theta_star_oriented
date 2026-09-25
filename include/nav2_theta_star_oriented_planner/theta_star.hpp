@@ -74,6 +74,12 @@ public:
   int how_many_corners_;
   /// parameter to set weather the planner can plan through unknown space
   bool allow_unknown_;
+  /// max raw costmap cost (0-254) a cell may have to be crossed by a line-of-sight shortcut;
+  /// grid expansion is unaffected. Values >= LETHAL_COST disable the extra check
+  int los_max_cost_;
+  /// exponent of the traversal cost curve w * (cost / LETHAL_COST)^n;
+  /// values <= 0 select the legacy formula w * ((26 + 0.9 * cost) / LETHAL_COST)^2
+  double cost_exponent_;
   /// the x-directional and y-directional lengths of the map respectively
   int size_x_, size_y_;
 
@@ -190,9 +196,16 @@ protected:
    */
   bool isSafe(const int & cx, const int & cy, double & cost) const
   {
+    const unsigned char raw_cost = costmap_->getCost(cx, cy);
     double curr_cost = getCost(cx, cy);
-    if ((costmap_->getCost(cx, cy) == UNKNOWN_COST && allow_unknown_) || curr_cost < LETHAL_COST) {
-      if (costmap_->getCost(cx, cy) == UNKNOWN_COST) {
+    if ((raw_cost == UNKNOWN_COST && allow_unknown_) || curr_cost < LETHAL_COST) {
+      if (cost_exponent_ > 0.0) {
+        cost += w_traversal_cost_ * std::pow(
+          raw_cost == UNKNOWN_COST ? 1.0 : raw_cost / static_cast<double>(LETHAL_COST),
+          cost_exponent_);
+        return true;
+      }
+      if (raw_cost == UNKNOWN_COST) {
         curr_cost = OBS_COST - 1;
       }
       cost += w_traversal_cost_ * curr_cost * curr_cost / LETHAL_COST / LETHAL_COST;
@@ -200,6 +213,19 @@ protected:
     } else {
       return false;
     }
+  }
+
+  /**
+   * @brief isSafe variant used by the line-of-sight check: additionally rejects known cells
+   *            whose raw cost exceeds los_max_cost_, so shortcuts cannot graze inflated corners
+   */
+  bool isLosSafe(const int & cx, const int & cy, double & cost) const
+  {
+    const unsigned char raw_cost = costmap_->getCost(cx, cy);
+    if (raw_cost != UNKNOWN_COST && raw_cost > los_max_cost_) {
+      return false;
+    }
+    return isSafe(cx, cy, cost);
   }
 
   /*
@@ -214,10 +240,17 @@ protected:
   /**
    * @brief for the point(cx, cy), its traversal cost is calculated by
    *                    <parameter>*(<actual_traversal_cost_from_costmap>)^2/(<max_cost>)^2
+   *            or, when cost_exponent_ > 0, by <parameter>*(<raw_cost>/<max_cost>)^<cost_exponent_>
    * @return the traversal cost thus calculated
    */
   inline double getTraversalCost(const int & cx, const int & cy)
   {
+    if (cost_exponent_ > 0.0) {
+      const unsigned char raw_cost = costmap_->getCost(cx, cy);
+      return w_traversal_cost_ * std::pow(
+        raw_cost == UNKNOWN_COST ? 1.0 : raw_cost / static_cast<double>(LETHAL_COST),
+        cost_exponent_);
+    }
     double curr_cost = getCost(cx, cy);
     return w_traversal_cost_ * curr_cost * curr_cost / LETHAL_COST / LETHAL_COST;
   }

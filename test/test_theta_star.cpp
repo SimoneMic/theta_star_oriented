@@ -41,6 +41,8 @@ public:
     return losCheck(x0, y0, x1, y1, sl_cost);
   }
 
+  double ugetTraversalCost(const int & cx, const int & cy) {return getTraversalCost(cx, cy);}
+
   bool uwithinLimits(const int & cx, const int & cy) {return withinLimits(cx, cy);}
 
   bool uisGoal(const tree_node & this_node) {return isGoal(this_node);}
@@ -132,6 +134,27 @@ TEST(ThetaStarTest, test_theta_star) {
   /// and as false
   EXPECT_FALSE(planner_->ulosCheck(2, 2, 18, 18, sl_cost));
 
+  /// los_max_cost rejects shortcuts through high-cost (but non-lethal) cells
+  /// (an axis-aligned line runs between two columns, so block both)
+  planner_->costmap_->setCost(2, 10, 200);
+  planner_->costmap_->setCost(3, 10, 200);
+  EXPECT_TRUE(planner_->ulosCheck(3, 5, 3, 15, sl_cost));   // default: check disabled
+  planner_->los_max_cost_ = 150;
+  EXPECT_FALSE(planner_->ulosCheck(3, 5, 3, 15, sl_cost));
+  EXPECT_TRUE(planner_->ulosCheck(6, 5, 6, 15, sl_cost));   // parallel line avoiding the cells
+  EXPECT_TRUE(planner_->isSafe(3, 10));                     // grid expansion is unaffected
+  planner_->los_max_cost_ = LETHAL_COST + 1;
+  planner_->costmap_->setCost(2, 10, 0);
+
+  /// cost_exponent switches to w * (cost / LETHAL_COST)^n
+  planner_->w_traversal_cost_ = 2.0;
+  EXPECT_NEAR(planner_->ugetTraversalCost(3, 10), 2.0 * std::pow(206.0 / LETHAL_COST, 2), 1e-9);
+  planner_->cost_exponent_ = 4.0;
+  EXPECT_NEAR(planner_->ugetTraversalCost(3, 10), 2.0 * std::pow(200.0 / LETHAL_COST, 4), 1e-9);
+  EXPECT_NEAR(planner_->ugetTraversalCost(5, 5), 0.0, 1e-9);
+  planner_->cost_exponent_ = 0.0;
+  planner_->costmap_->setCost(3, 10, 0);
+
   planner_->uresetContainers();
   std::vector<coordsW> path;
   /// Check if the planner returns a path for the case where a path exists
@@ -213,7 +236,9 @@ TEST(ThetaStarOrientedPlanner, test_theta_star_reconfigure)
       rclcpp::Parameter("test.w_euc_cost", 1.0),
       rclcpp::Parameter("test.w_traversal_cost", 2.0),
       rclcpp::Parameter("test.use_final_approach_orientation", false),
-      rclcpp::Parameter("test.allow_unknown", false)});
+      rclcpp::Parameter("test.allow_unknown", false),
+      rclcpp::Parameter("test.los_max_cost", 200),
+      rclcpp::Parameter("test.cost_exponent", 4.0)});
 
   rclcpp::spin_until_future_complete(
     life_node->get_node_base_interface(),
@@ -226,6 +251,8 @@ TEST(ThetaStarOrientedPlanner, test_theta_star_reconfigure)
   EXPECT_EQ(life_node->get_parameter("test.w_traversal_cost").as_double(), 2.0);
   EXPECT_EQ(life_node->get_parameter("test.use_final_approach_orientation").as_bool(), false);
   EXPECT_EQ(life_node->get_parameter("test.allow_unknown").as_bool(), false);
+  EXPECT_EQ(life_node->get_parameter("test.los_max_cost").as_int(), 200);
+  EXPECT_EQ(life_node->get_parameter("test.cost_exponent").as_double(), 4.0);
 
   rclcpp::spin_until_future_complete(
     life_node->get_node_base_interface(),

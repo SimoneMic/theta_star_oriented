@@ -68,6 +68,14 @@ void ThetaStarOrientedPlanner::configure(
   planner_->w_heuristic_cost_ = planner_->w_euc_cost_ < 1.0 ? planner_->w_euc_cost_ : 1.0;
 
   nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".los_max_cost", rclcpp::ParameterValue(LETHAL_COST + 1));
+  node->get_parameter(name_ + ".los_max_cost", planner_->los_max_cost_);
+
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".cost_exponent", rclcpp::ParameterValue(0.0));
+  node->get_parameter(name_ + ".cost_exponent", planner_->cost_exponent_);
+
+  nav2_util::declare_parameter_if_not_declared(
     node, name + ".use_final_approach_orientation", rclcpp::ParameterValue(false));
   node->get_parameter(name + ".use_final_approach_orientation", use_final_approach_orientation_);
 
@@ -365,12 +373,16 @@ ThetaStarOrientedPlanner::dynamicParametersCallback(std::vector<rclcpp::Paramete
     if (type == ParameterType::PARAMETER_INTEGER) {
       if (name == name_ + ".how_many_corners") {
         planner_->how_many_corners_ = parameter.as_int();
+      } else if (name == name_ + ".los_max_cost") {
+        planner_->los_max_cost_ = parameter.as_int();
       }
     } else if (type == ParameterType::PARAMETER_DOUBLE) {
       if (name == name_ + ".w_euc_cost") {
         planner_->w_euc_cost_ = parameter.as_double();
       } else if (name == name_ + ".w_traversal_cost") {
         planner_->w_traversal_cost_ = parameter.as_double();
+      } else if (name == name_ + ".cost_exponent") {
+        planner_->cost_exponent_ = parameter.as_double();
       } else if (name == name_ + ".proximity_threshold") {
         proximity_threshold_ = parameter.as_double();
       } else if (name == name_ + ".orientation_delta") {
